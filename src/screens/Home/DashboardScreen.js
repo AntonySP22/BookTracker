@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -9,75 +9,62 @@ import {
   SafeAreaView,
   Platform,
   StatusBar,
+  ActivityIndicator,
+  Alert
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-
-// Datos de ejemplo
-const mockBooks = [
-  {
-    id: 1,
-    title: "Cien años de soledad",
-    author: "Gabriel García Márquez",
-    status: "completed",
-    startDate: "2023-01-15",
-    endDate: "2023-02-20",
-    comment: "Una obra maestra de la literatura latinoamericana.",
-  },
-  {
-    id: 2,
-    title: "El señor de los anillos",
-    author: "J.R.R. Tolkien",
-    status: "reading",
-    startDate: "2023-03-10",
-    endDate: null,
-    comment: "Fascinante mundo de fantasía.",
-  },
-  {
-    id: 3,
-    title: "1984",
-    author: "George Orwell",
-    status: "to-read",
-    startDate: null,
-    endDate: null,
-    comment: "",
-  },
-  {
-    id: 4,
-    title: "Don Quijote de la Mancha",
-    author: "Miguel de Cervantes",
-    status: "completed",
-    startDate: "2022-11-05",
-    endDate: "2023-01-10",
-    comment: "Clásico imprescindible de la literatura española.",
-  },
-  {
-    id: 5,
-    title: "Harry Potter y la piedra filosofal",
-    author: "J.K. Rowling",
-    status: "reading",
-    startDate: "2023-04-20",
-    endDate: null,
-    comment: "Relectura del primer libro de la saga.",
-  },
-];
+import { getUserBooks } from '../../services/bookService';
 
 const DashboardScreen = () => {
   const navigation = useNavigation();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
+  const [books, setBooks] = useState([]);
+  const [filteredBooks, setFilteredBooks] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const filteredBooks = mockBooks.filter(
-    (book) =>
-      book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      book.author.toLowerCase().includes(searchQuery.toLowerCase())
+  // Cargar libros cada vez que la pantalla obtiene foco
+  useFocusEffect(
+    React.useCallback(() => {
+      const loadBooks = async () => {
+        setIsLoading(true);
+        try {
+          const userBooks = await getUserBooks();
+          setBooks(userBooks);
+          setFilteredBooks(userBooks);
+          setError(null);
+        } catch (error) {
+          console.error('Error al cargar libros:', error);
+          setError('No se pudieron cargar los libros. Por favor, intenta de nuevo.');
+          Alert.alert('Error', 'No se pudieron cargar los libros. Por favor, intenta de nuevo.');
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      loadBooks();
+    }, [])
   );
 
+  // Filtrar libros cuando cambia la búsqueda o la lista de libros
+  useEffect(() => {
+    const filtered = books.filter(
+      (book) =>
+        book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        book.author.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredBooks(filtered);
+  }, [searchQuery, books]);
+
+  // Obtener libros por estado
   const readingBooks = filteredBooks.filter((book) => book.status === "reading");
   const completedBooks = filteredBooks.filter((book) => book.status === "completed");
   const toReadBooks = filteredBooks.filter((book) => book.status === "to-read");
 
+  // Obtener los libros según la pestaña seleccionada
   const getDisplayBooks = () => {
     switch(activeTab) {
       case "reading":
@@ -90,17 +77,67 @@ const DashboardScreen = () => {
         return filteredBooks;
     }
   };
+   
+  // Navegar a la pantalla de detalles del libro
+  const handleBookSelect = (bookId) => {
+    navigation.navigate('BookDetailScreen', { 
+      bookId: bookId,
+      source: 'dashboard'
+    });
+  };
 
+  // Renderizar cada tarjeta de libro
   const renderBookCard = ({ item }) => (
-    <BookCard book={item} onPress={() => navigation.navigate('BookDetail', { bookId: item.id })} />
+    <BookCard 
+      book={item} 
+      onPress={() => handleBookSelect(item.id)} 
+    />
   );
 
+  // Mostrar indicador de carga
+  if (isLoading) {
+    return (
+      <LinearGradient
+        colors={['#ecfdf5', '#d1fae5']}
+        style={[styles.container, styles.centerContent]}
+      >
+        <ActivityIndicator size="large" color="#059669" />
+        <Text style={styles.loadingText}>Cargando libros...</Text>
+      </LinearGradient>
+    );
+  }
+
+  // Mostrar mensaje de error
+  if (error) {
+    return (
+      <LinearGradient
+        colors={['#ecfdf5', '#d1fae5']}
+        style={[styles.container, styles.centerContent]}
+      >
+        <Feather name="alert-circle" size={48} color="#EF4444" />
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => {
+            setIsLoading(true);
+            setError(null);
+            loadBooks();
+          }}
+        >
+          <Text style={styles.retryButtonText}>Intentar de nuevo</Text>
+        </TouchableOpacity>
+      </LinearGradient>
+    );
+  }
+
+  // Contenido principal
   return (
     <LinearGradient
       colors={['#ecfdf5', '#d1fae5']}
       style={styles.container}
     >
       <SafeAreaView style={styles.safeArea}>
+        {/* Encabezado con título y botón de perfil */}
         <View style={styles.header}>
           <View style={styles.titleContainer}>
             <Feather name="book-open" size={24} color="#059669" style={styles.headerIcon} />
@@ -114,6 +151,7 @@ const DashboardScreen = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Barra de búsqueda y botón de agregar */}
         <View style={styles.searchContainer}>
           <View style={styles.searchInputContainer}>
             <Feather name="search" size={16} color="#9CA3AF" style={styles.searchIcon} />
@@ -126,13 +164,14 @@ const DashboardScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.addButton}
-            onPress={() => navigation.navigate('NewBook')}
+            onPress={() => navigation.navigate('BookFormScreen', { isNewBook: true })}
           >
             <Feather name="plus" size={16} color="#FFFFFF" style={styles.addIcon} />
             <Text style={styles.addButtonText}>Nuevo libro</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Pestañas de filtro */}
         <View style={styles.tabsContainer}>
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'all' && styles.activeTab]}
@@ -169,6 +208,7 @@ const DashboardScreen = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Lista de libros o mensaje de estado vacío */}
         {getDisplayBooks().length > 0 ? (
           <FlatList
             data={getDisplayBooks()}
@@ -177,13 +217,17 @@ const DashboardScreen = () => {
             contentContainerStyle={styles.booksList}
           />
         ) : (
-          <EmptyState status={activeTab} onPress={() => navigation.navigate('NewBook')} />
+          <EmptyState 
+            status={activeTab} 
+            onPress={() => navigation.navigate('BookFormScreen', { isNewBook: true })}
+          />
         )}
       </SafeAreaView>
     </LinearGradient>
   );
 };
 
+// Componente para mostrar la tarjeta de cada libro
 const BookCard = ({ book, onPress }) => {
   const statusColors = {
     reading: { bg: '#FEF3C7', text: '#92400E' },
@@ -203,6 +247,7 @@ const BookCard = ({ book, onPress }) => {
     <TouchableOpacity 
       style={styles.bookCard}
       onPress={onPress}
+      activeOpacity={0.7}
     >
       <View style={styles.bookContent}>
         <View style={styles.bookInfo}>
@@ -227,6 +272,7 @@ const BookCard = ({ book, onPress }) => {
   );
 };
 
+// Componente para mostrar mensajes cuando no hay libros
 const EmptyState = ({ status = "all", onPress }) => {
   const messages = {
     all: "No se encontraron libros",
@@ -242,9 +288,16 @@ const EmptyState = ({ status = "all", onPress }) => {
     "to-read": "Agrega un libro en esta categoría para comenzar",
   };
 
+  const icons = {
+    all: "book",
+    reading: "book-open",
+    completed: "check-circle",
+    "to-read": "bookmark"
+  };
+
   return (
     <View style={styles.emptyContainer}>
-      <Feather name="book-open" size={48} color="#D1D5DB" style={styles.emptyIcon} />
+      <Feather name={icons[status]} size={48} color="#D1D5DB" style={styles.emptyIcon} />
       <Text style={styles.emptyTitle}>{messages[status]}</Text>
       <Text style={styles.emptyDescription}>{descriptions[status]}</Text>
       <TouchableOpacity style={styles.emptyButton} onPress={onPress}>
@@ -258,6 +311,15 @@ const EmptyState = ({ status = "all", onPress }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#059669',
   },
   safeArea: {
     flex: 1,
@@ -407,43 +469,69 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    marginHorizontal: 16,
-    paddingVertical: 40,
+    paddingHorizontal: 24,
   },
   emptyIcon: {
     marginBottom: 16,
   },
   emptyTitle: {
     fontSize: 18,
-    fontWeight: '500',
-    color: '#1F2937',
+    fontWeight: 'bold',
+    color: '#374151',
+    marginTop: 16,
     marginBottom: 8,
   },
   emptyDescription: {
     fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 24,
   },
-  emptyButton: {
-    flexDirection: 'row',
+  addBookButton: {
+    backgroundColor: '#059669',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  addBookButtonText: {
+    color: 'white',
+    fontWeight: '500',
+    fontSize: 16,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#EF4444',
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 12,
     backgroundColor: '#059669',
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
     alignItems: 'center',
   },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  emptyButton: {
+    flexDirection: 'row',
+    backgroundColor: '#059669',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   emptyButtonIcon: {
     marginRight: 8,
   },
   emptyButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '500',
   },
 });

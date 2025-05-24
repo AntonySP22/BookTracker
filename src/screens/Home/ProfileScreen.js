@@ -14,148 +14,114 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { auth, db } from '../../services/firebase';
+import { auth } from '../../services/firebase';
+import { getUserReadingStats } from '../../services/bookService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Pantalla principal que muestra el perfil del usuario y estadísticas de lectura
 const ProfileScreen = () => {
   const navigation = useNavigation();
   const [userData, setUserData] = useState(null);
   const [readingStats, setReadingStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Función para cargar datos del usuario
+  // Función para cargar datos del usuario y calcular estadísticas
   useEffect(() => {
     const loadUserData = async () => {
       setIsLoading(true);
       
       try {
-        const currentUser = auth.currentUser;
+        // Intentar obtener datos de AsyncStorage
+        const storedUserData = await AsyncStorage.getItem('userData');
+        let user = null;
         
-        if (!currentUser) {
-          // Intentar obtener datos de AsyncStorage si no hay usuario autenticado
-          const storedUserData = await AsyncStorage.getItem('userData');
-          if (storedUserData) {
-            const parsedData = JSON.parse(storedUserData);
-            setUserData(parsedData);
-            
-            // Si hay estadísticas almacenadas en AsyncStorage, usarlas
-            if (parsedData.readingStats) {
-              setReadingStats(parsedData.readingStats);
-            } else {
-              setReadingStats({ total: 0, reading: 0, completed: 0, toRead: 0 });
-            }
-            setIsLoading(false);
-            return;
-          }
-          
-          Alert.alert(
-            'Sesión expirada',
-            'Por favor, inicia sesión nuevamente.',
-            [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
-          );
-          return;
-        }
-        
-        // Obtener datos actualizados del usuario desde Firestore
-        const userDoc = await db.collection('users').doc(currentUser.uid).get();
-        
-        if (userDoc.exists) {
-          const userFirestoreData = userDoc.data();
-          
-          // Crear objeto con datos del usuario
-          const userInfo = {
-            uid: currentUser.uid,
-            email: currentUser.email,
-            fullName: userFirestoreData.fullName || `${userFirestoreData.firstName} ${userFirestoreData.lastName}`,
-            firstName: userFirestoreData.firstName,
-            lastName: userFirestoreData.lastName,
-            joinDate: userFirestoreData.joinDate
-          };
-          
-          setUserData(userInfo);
-          
-          const statsDoc = await db.collection('readingStats').doc(currentUser.uid).get();
-          
-          if (statsDoc.exists) {
-            setReadingStats(statsDoc.data());
-          } else {
-            const defaultStats = { total: 0, reading: 0, completed: 0, toRead: 0 };
-            setReadingStats(defaultStats);
-            
-            await db.collection('readingStats').doc(currentUser.uid).set({
-              ...defaultStats,
-              lastUpdated: new Date()
-            });
-          }
-          
-          await AsyncStorage.setItem('userData', JSON.stringify({
-            ...userInfo,
-            readingStats: statsDoc.exists ? statsDoc.data() : { total: 0, reading: 0, completed: 0, toRead: 0 }
-          }));
-          
+        if (storedUserData) {
+          user = JSON.parse(storedUserData);
         } else {
-          throw new Error('No se encontraron datos de usuario');
+          // Si no hay datos, usamos datos de muestra
+          user = {
+            fullName: "Usuario de Prueba",
+            email: "usuario@example.com",
+            joinDate: "2023-05-01"
+          };
         }
+        
+        setUserData(user);
+        
+        // Obtener estadísticas reales de Firebase
+        if (auth.currentUser) {
+          // Recuperamos las estadísticas de lectura desde la base de datos
+          const stats = await getUserReadingStats();
+          setReadingStats(stats);
+        } else {
+          // Si no hay usuario autenticado, usar datos de prueba
+          setReadingStats({
+            total: 0,
+            reading: 0,
+            completed: 0,
+            toRead: 0
+          });
+        }
+        
       } catch (error) {
         console.error('Error al cargar datos del perfil:', error);
-        Alert.alert(
-          'Error al cargar datos',
-          'No se pudieron cargar los datos del perfil. Inténtalo de nuevo más tarde.'
-        );
+        
+        // En caso de error, establecer datos predeterminados
+        setUserData({
+          fullName: auth.currentUser?.displayName || "Usuario de Prueba",
+          email: auth.currentUser?.email || "usuario@example.com",
+          joinDate: "2025-05-23"
+        });
+        
+        // Usar estadísticas básicas como fallback
+        setReadingStats({
+          total: 0,
+          reading: 0,
+          completed: 0,
+          toRead: 0
+        });
       } finally {
         setIsLoading(false);
       }
     };
     
+    // Iniciamos la carga de datos cuando se muestra la pantalla
     loadUserData();
   }, []);
   
+  // Manejo del cierre de sesión
   const handleLogout = async () => {
-    try {
-      // Confirmar cierre de sesión
-      Alert.alert(
-        '¿Cerrar sesión?',
-        '¿Estás seguro de que quieres cerrar tu sesión?',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Cerrar sesión',
-            style: 'destructive',
-            onPress: async () => {
+    Alert.alert(
+      '¿Cerrar sesión?',
+      '¿Estás seguro de que quieres cerrar tu sesión?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cerrar sesión',
+          style: 'destructive',
+          onPress: async () => {
+            try {
               setIsLoading(true);
-              
-              try {
-                // Cerrar sesión en Firebase
-                await auth.signOut();
-                
-                // Eliminar datos de AsyncStorage
-                await AsyncStorage.removeItem('userData');
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: 'Welcome' }],
-                });
-              } catch (error) {
-                console.error('Error al cerrar sesión:', error);
-                Alert.alert(
-                  'Error',
-                  'Ocurrió un problema al cerrar la sesión. Inténtalo de nuevo.'
-                );
-                setIsLoading(false);
-              }
+              // Cerramos sesión en Firebase y eliminamos datos locales
+              await auth.signOut();
+              await AsyncStorage.removeItem('userData');
+              // Redirigimos al usuario a la pantalla de bienvenida
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Welcome' }],
+              });
+            } catch (error) {
+              console.error('Error al cerrar sesión:', error);
+              Alert.alert('Error', 'No se pudo cerrar la sesión. Inténtalo de nuevo.');
+              setIsLoading(false);
             }
           }
-        ]
-      );
-    } catch (error) {
-      console.error('Error al cerrar sesión:', error);
-      Alert.alert(
-        'Error',
-        'Ocurrió un problema al cerrar la sesión. Inténtalo de nuevo.'
-      );
-    }
+        }
+      ]
+    );
   };
 
-
+  // Pantalla de carga mientras se recuperan los datos
   if (isLoading) {
     return (
       <LinearGradient
@@ -168,11 +134,12 @@ const ProfileScreen = () => {
     );
   }
 
-  // Calcular porcentaje de libros completados
+  // Calcular porcentaje de libros completados usando los datos reales
   const completionPercentage = readingStats && readingStats.total > 0 
     ? Math.round((readingStats.completed / readingStats.total) * 100) 
     : 0;
 
+  // Interfaz principal del perfil del usuario
   return (
     <LinearGradient
       colors={['#ecfdf5', '#d1fae5']}
@@ -180,6 +147,7 @@ const ProfileScreen = () => {
     >
       <SafeAreaView style={styles.safeArea}>
         <ScrollView style={styles.scrollView}>
+          {/* Botón para regresar a la biblioteca */}
           <TouchableOpacity 
             style={styles.backButton}
             onPress={() => navigation.navigate('Dashboard')}
@@ -188,18 +156,20 @@ const ProfileScreen = () => {
             <Text style={styles.backButtonText}>Volver al listado</Text>
           </TouchableOpacity>
 
+          {/* Tarjeta con información personal del usuario */}
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>Perfil de usuario</Text>
             </View>
             <View style={styles.cardContent}>
               <View style={styles.profileContainer}>
+                {/* Avatar generado con iniciales del usuario */}
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>
                     {userData?.fullName
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
+                      ? userData?.fullName.split(" ").map((n) => n[0]).join("")
+                      : "U"
+                    }
                   </Text>
                 </View>
                 <View style={styles.profileInfo}>
@@ -213,6 +183,7 @@ const ProfileScreen = () => {
 
               <View style={styles.separator} />
 
+              {/* Botón para cerrar sesión */}
               <View style={styles.logoutContainer}>
                 <TouchableOpacity 
                   style={styles.logoutButton} 
@@ -225,11 +196,13 @@ const ProfileScreen = () => {
             </View>
           </View>
 
+          {/* Sección de estadísticas de lectura */}
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>Estadísticas de lectura</Text>
             </View>
             <View style={styles.cardContent}>
+              {/* Tarjetas con indicadores clave de lectura */}
               <View style={styles.statsGrid}>
                 <StatCard 
                   icon={<Feather name="book-open" size={20} color="#059669" />}
@@ -257,6 +230,7 @@ const ProfileScreen = () => {
                 />
               </View>
 
+              {/* Barra de progreso visual */}
               <View style={styles.progressSection}>
                 <Text style={styles.progressTitle}>Progreso de lectura</Text>
                 <View style={styles.progressBarContainer}>
@@ -281,6 +255,7 @@ const ProfileScreen = () => {
   );
 };
 
+// Componente reutilizable para mostrar estadísticas individuales
 const StatCard = ({ icon, title, value, description }) => {
   return (
     <View style={styles.statCard}>
