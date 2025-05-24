@@ -126,17 +126,6 @@ export const logoutUser = async () => {
   }
 };
 
-// Envía correo para restablecer contraseña
-export const resetPassword = async (email) => {
-  try {
-    await auth.sendPasswordResetEmail(email);
-    return true;
-  } catch (error) {
-    console.error('Error al restablecer contraseña:', error);
-    throw error;
-  }
-};
-
 // Actualiza datos del perfil del usuario
 export const updateUserProfile = async (updatedData) => {
   try {
